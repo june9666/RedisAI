@@ -300,55 +300,16 @@ int RedisAI_TensorGet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
 
   RedisModule_ReplyWithArray(ctx, resplen);
 
-  DLDataType dtype = RAI_TensorDataType(t);
-  if (dtype.code == kDLFloat) {
-    switch (dtype.bits) {
-      case 32:
-        RedisModule_ReplyWithSimpleString(ctx, "FLOAT");
-        break;
-      case 64:
-        RedisModule_ReplyWithSimpleString(ctx, "DOUBLE");
-        break;
-      default:
-        RedisModule_ReplyWithError(ctx, "ERR unsupported dtype");
-        break;
-    }
-  }
-  else if (dtype.code == kDLInt) {
-    switch (dtype.bits) {
-      case 8:
-        RedisModule_ReplyWithSimpleString(ctx, "INT8");
-        break;
-      case 16:
-        RedisModule_ReplyWithSimpleString(ctx, "INT16");
-        break;
-      case 32:
-        RedisModule_ReplyWithSimpleString(ctx, "INT32");
-        break;
-      case 64:
-        RedisModule_ReplyWithSimpleString(ctx, "INT64");
-        break;
-      default:
-        RedisModule_ReplyWithError(ctx, "ERR unsupported dtype");
-        break;
-    }
-  }
-  else if (dtype.code == kDLUInt) {
-    switch (dtype.bits) {
-      case 8:
-        RedisModule_ReplyWithSimpleString(ctx, "INT8");
-        break;
-      case 16:
-        RedisModule_ReplyWithSimpleString(ctx, "INT16");
-        break;
-      default:
-        RedisModule_ReplyWithError(ctx, "ERR unsupported dtype");
-        break;
-    }
+  char *dtypestr = NULL;
+  Tensor_DataTypeStr(RAI_TensorDataType(t), &dtypestr);
+
+  if (dtypestr) {
+    RedisModule_ReplyWithSimpleString(ctx, dtypestr);
   }
   else {
-    assert(0);
+    RedisModule_ReplyWithError(ctx, "ERR unsupported dtype");
   }
+  RedisModule_Free(dtypestr);
 
   RedisModule_ReplyWithArray(ctx, ndims);
   for (long long i=0; i<ndims; i++) {
@@ -640,6 +601,29 @@ void *RedisAI_RunSession(void *arg) {
 //  // TODO: clean up
 //}
 
+void RedisAI_ReplicateTensorSet(RedisModuleCtx *ctx, RedisModuleString *key, RAI_Tensor *t) {
+  long long ndims = RAI_TensorNumDims(t);
+
+  char *dtypestr = NULL;
+  Tensor_DataTypeStr(RAI_TensorDataType(t), &dtypestr);
+
+  assert(dtypestr);
+
+  char *data = RAI_TensorData(t);
+  long long size = RAI_TensorByteSize(t);
+
+  RedisModuleString* dims[ndims];
+
+  for (long long i=0; i<ndims; i++) {
+    dims[i] = RedisModule_CreateStringFromLongLong(ctx, RAI_TensorDim(t, i));
+  }
+
+  RedisModule_Replicate(ctx, "AI.TENSORSET", "scvcb", key, dtypestr,
+                        dims, ndims, "BLOB", data, size);
+
+  RedisModule_Free(dtypestr);
+}
+
 int RedisAI_Run_Reply(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
   REDISMODULE_NOT_USED(argv);
   REDISMODULE_NOT_USED(argc);
@@ -667,6 +651,10 @@ int RedisAI_Run_Reply(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
       RedisModule_ModuleTypeSetValue(outkey, RedisAI_TensorType, RAI_TensorGetShallowCopy(t));
     }
     RedisModule_CloseKey(outkey);
+
+    if (t) {
+      RedisAI_ReplicateTensorSet(ctx, rinfo->outkeys[i], t);
+    }
   }
 
   // FIXME This crashes Redis, we need to investigate.
@@ -811,7 +799,8 @@ int RedisAI_ModelRun_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
   // RedisAI_RunSession(rinfo);
   // RedisAI_FreeRunInfo(ctx, rinfo);
   // return RedisModule_ReplyWithSimpleString(ctx, "foo");
-  RedisModule_ReplicateVerbatim(ctx);
+
+  // RedisModule_ReplicateVerbatim(ctx);
 
   return REDISMODULE_OK;
 }
@@ -969,6 +958,10 @@ int RedisAI_ScriptRun_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
       RedisModule_ModuleTypeSetValue(outkey, RedisAI_TensorType, RAI_TensorGetShallowCopy(t));
     }
     RedisModule_CloseKey(outkey);
+
+    if (t) {
+      RedisAI_ReplicateTensorSet(ctx, outkeys[i], t);
+    }
   }
 
   RAI_ScriptRunCtxFree(sctx);
