@@ -968,8 +968,6 @@ int RedisAI_ScriptRun_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
 
   RedisModule_ReplyWithSimpleString(ctx, "OK");
 
-  RedisModule_ReplicateVerbatim(ctx);
-
   return REDISMODULE_OK;
 }
 
