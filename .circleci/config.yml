@@ -66,7 +66,7 @@ jobs:
       - image: redisfab/rmbuilder:x64-buster
     steps:
       - ci_steps:
-          platform: debian 
+          platform: debian
   build-macos:
     macos:
       xcode: 10.2.1
@@ -90,6 +90,22 @@ jobs:
             sudo docker login -u redisfab -p $DOCKER_REDISFAB_PWD
             make -C opt/build/docker build
             sudo make -C opt/build/docker publish
+  build-gpu:
+    machine:
+      docker_layer_caching: true
+      resource_class: gpu.nvidia.medium
+      image: ubuntu-1604-cuda-10.1:201909-23
+    steps:
+      - checkout
+      - run:
+          name: Bulding Docker
+          command: |
+            docker build -f Dockerfile.gpu-test -t redisai-gpu-test .
+      - run:
+          name: Test
+          command: |
+            mkdir -p ~/workspace/tests
+            docker run --gpus all -v $HOME/workspace/tests:/data/tests/logs -it --rm redisai-gpu-test
 
   deploy_package:
     parameters:
@@ -127,6 +143,10 @@ workflows:
             tags:
               only: /.*/
       - build-macos:
+          filters:
+            tags:
+              only: /.*/
+      - build-gpu:
           filters:
             tags:
               only: /.*/
